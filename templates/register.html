@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Register - FocusBoard</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+    <div class="auth-container">
+        <h1>Register</h1>
+        <p class="subtitle">Create your FocusBoard account</p>
+
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                {% for category, message in messages %}
+                    <div class="flash-message {{ category }}">{{ message }}</div>
+                {% endfor %}
+            {% endif %}
+        {% endwith %}
+
+        <form method="POST" class="auth-form" autocomplete="off" id="register-form">
+            <input
+                type="text"
+                name="username"
+                placeholder="Choose username"
+                required
+                autocomplete="off"
+                autocapitalize="off"
+                autocorrect="off"
+                spellcheck="false"
+            >
+
+            <input
+                type="password"
+                name="password"
+                placeholder="Choose password"
+                required
+                autocomplete="new-password"
+            >
+
+            <button type="submit">Register</button>
+        </form>
+
+        <p class="auth-link">
+            Already have an account?
+            <a href="{{ url_for('login') }}">Login here</a>
+        </p>
+    </div>
+
+    <script>
+        window.addEventListener("load", function () {
+            const form = document.getElementById("register-form");
+            if (form) {
+                form.reset();
+            }
+        });
+    </script>
+</body>
+</html>

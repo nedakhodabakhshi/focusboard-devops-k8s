@@ -1,0 +1,33 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: focusboard-db
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: focusboard-db
+  template:
+    metadata:
+      labels:
+        app: focusboard-db
+    spec:
+      containers:
+        - name: db
+          image: postgres:16
+          ports:
+            - containerPort: 5432
+          env:
+            - name: POSTGRES_DB
+              value: "focusboard"
+            - name: POSTGRES_USER
+              value: "focususer"
+            - name: POSTGRES_PASSWORD
+              value: "focuspass"
+          volumeMounts:
+            - name: postgres-storage
+              mountPath: /var/lib/postgresql/data
+      volumes:
+        - name: postgres-storage
+          persistentVolumeClaim:
+            claimName: focusboard-db-pvc

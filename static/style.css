@@ -1,0 +1,210 @@
+body {
+    font-family: Arial, sans-serif;
+    background: #f4f7fb;
+    margin: 0;
+    padding: 0;
+}
+
+.container {
+    width: 80%;
+    max-width: 980px;
+    margin: 40px auto;
+    background: white;
+    padding: 30px;
+    border-radius: 14px;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.08);
+}
+
+.top-bar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 20px;
+}
+
+h1 {
+    margin-bottom: 5px;
+    color: #1f2937;
+}
+
+.subtitle {
+    color: #6b7280;
+    margin-bottom: 25px;
+}
+
+.task-form,
+.filter-form {
+    display: flex;
+    gap: 10px;
+    margin-bottom: 20px;
+    flex-wrap: wrap;
+}
+
+.task-form input,
+.task-form select,
+.filter-form input,
+.filter-form select {
+    flex: 1;
+    min-width: 180px;
+    padding: 12px;
+    border: 1px solid #d1d5db;
+    border-radius: 8px;
+    background: white;
+}
+
+.task-form button,
+.filter-btn {
+    padding: 12px 18px;
+    border: none;
+    background: #2563eb;
+    color: white;
+    border-radius: 8px;
+    cursor: pointer;
+}
+
+.clear-btn {
+    text-decoration: none;
+    text-align: center;
+    background: #6b7280;
+    color: white;
+    padding: 12px 18px;
+    border-radius: 8px;
+    display: inline-block;
+}
+
+.task-card {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 20px;
+    background: #f9fafb;
+    border: 1px solid #e5e7eb;
+    padding: 18px;
+    border-radius: 10px;
+    margin-bottom: 15px;
+}
+
+.task-card h3 {
+    margin: 0 0 8px 0;
+}
+
+.task-info p {
+    margin: 8px 0;
+}
+
+.task-actions {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    min-width: 120px;
+}
+
+.complete-btn,
+.edit-btn,
+.delete-btn,
+.logout-btn {
+    text-decoration: none;
+    text-align: center;
+    color: white;
+    border: none;
+    padding: 10px 14px;
+    border-radius: 8px;
+    cursor: pointer;
+    display: inline-block;
+    font-size: 14px;
+}
+
+.complete-btn {
+    background: #16a34a;
+}
+
+.edit-btn {
+    background: #f59e0b;
+}
+
+.delete-btn {
+    background: #dc2626;
+}
+
+.logout-btn {
+    background: #dc2626;
+}
+
+.done {
+    color: #16a34a;
+    font-weight: bold;
+}
+
+.pending {
+    color: #dc2626;
+    font-weight: bold;
+}
+
+.priority {
+    font-weight: bold;
+}
+
+.priority.low {
+    color: #2563eb;
+}
+
+.priority.medium {
+    color: #f59e0b;
+}
+
+.priority.high {
+    color: #dc2626;
+}
+
+.auth-container {
+    width: 90%;
+    max-width: 460px;
+    margin: 80px auto;
+    background: white;
+    padding: 30px;
+    border-radius: 14px;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.08);
+}
+
+.auth-form {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+}
+
+.auth-form input,
+.auth-form select {
+    padding: 12px;
+    border: 1px solid #d1d5db;
+    border-radius: 8px;
+    background: white;
+}
+
+.auth-form button {
+    padding: 12px;
+    border: none;
+    background: #2563eb;
+    color: white;
+    border-radius: 8px;
+    cursor: pointer;
+}
+
+.auth-link {
+    margin-top: 20px;
+}
+
+.flash-message {
+    padding: 12px;
+    border-radius: 8px;
+    margin-bottom: 16px;
+}
+
+.flash-message.success {
+    background: #dcfce7;
+    color: #166534;
+}
+
+.flash-message.error {
+    background: #fee2e2;
+    color: #991b1b;
+}
