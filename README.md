@@ -1109,7 +1109,7 @@ kubectl get pods
 kubectl describe deployment focusboard-web
 ```
 
-# Part 15 - Final Result
+# Part 14 - Final Result
 
 At the end of this project, you have:
 
