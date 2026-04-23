@@ -146,15 +146,6 @@ pip install -r requirements.txt
 > ```bash
 > pip install -r requirements.txt
 > ```
->
-> not:
->
-> ```bash
-> pip install requirements.txt
-> ```
->
-> The `-r` flag tells pip to read packages from the file.
-
 ---
 
 ## 3. Run the app
