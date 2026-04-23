@@ -876,25 +876,7 @@ Then open:
 http://localhost:5000
 ```
 
----
-
-# Part 10 - GitHub Repository Setup
-
-## Suggested repository name
-
-```text
-focusboard-devops-k8s
-```
-
-## Suggested description
-
-```text
-FocusBoard is a full-stack task management application built with Flask, containerized using Docker, and deployed on Kubernetes. The project includes PostgreSQL for persistence, Redis for caching, and demonstrates real-world DevOps practices such as CI/CD pipelines, ConfigMaps, Secrets, health checks, and persistent volumes.
-```
-
----
-
-# Part 11 - GitHub Actions CI
+# Part 10 - GitHub Actions CI
 
 ## Goal
 
@@ -936,7 +918,7 @@ The project first used a workflow that:
 
 ---
 
-# Part 12 - Self-hosted Runner for CD
+# Part 11 - Self-hosted Runner for CD
 
 ## Why self-hosted runner?
 
@@ -1013,7 +995,7 @@ Listening for Jobs
 
 ---
 
-# Part 13 - Full CI/CD Workflow
+# Part 12 - Full CI/CD Workflow
 
 ## Final workflow file
 
@@ -1085,7 +1067,7 @@ When you push to `main`:
 
 ---
 
-# Part 14 - Verification Commands
+# Part 13 - Verification Commands
 
 ## Check workflow result
 Go to:
