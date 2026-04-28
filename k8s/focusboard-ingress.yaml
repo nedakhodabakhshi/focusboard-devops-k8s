@@ -1,0 +1,17 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: focusboard-ingress
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: focusboard.local
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: focusboard-web-service
+                port:
+                  number: 5000

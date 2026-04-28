@@ -1139,11 +1139,219 @@ Created as a hands-on DevOps learning project by **Neda Khodabakhshi**.
 
 ---
 
-## Suggested next improvements
 
-- Ingress
-- Helm chart
-- EKS deployment
-- monitoring with Prometheus and Grafana
-- production-grade secret management
-- GitHub Actions self-hosted runner as a Windows service
+
+# Part 15 - Ingress (Production-style Access)
+
+## Why Ingress?
+
+NodePort and Port Forward are not ideal for real-world usage.
+
+Ingress provides:
+
+- clean URLs (no ports)
+- domain-based routing
+- production-like architecture
+
+---
+
+## Step 1 - Install NGINX Ingress Controller
+
+```bash
+kubectl apply -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/main/deploy/static/provider/cloud/deploy.yaml
+```
+
+Wait until controller is ready:
+
+```bash
+kubectl get pods -n ingress-nginx
+```
+
+Expected:
+Running
+
+---
+
+## Step 2 - Create Ingress Resource
+
+Create a new file:
+
+k8s/focusboard-ingress.yaml
+
+### File content:
+
+```yaml
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: focusboard-ingress
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: focusboard.local
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: focusboard-web-service
+                port:
+                  number: 5000
+```
+
+---
+
+## Step 3 - Apply Ingress
+
+```bash
+kubectl apply -f k8s/focusboard-ingress.yaml
+```
+
+Check:
+
+```bash
+kubectl get ingress
+```
+
+---
+
+## Step 4 - Configure local DNS (hosts file)
+
+Edit:
+
+C:\Windows\System32\drivers\etc\hosts
+
+Add:
+
+127.0.0.1 focusboard.local
+
+---
+
+## Step 5 - Access the App
+
+Open in browser:
+
+http://focusboard.local/login
+
+---
+
+## Final Result with Ingress
+
+Browser → focusboard.local → Ingress → Service → Pods
+
+---
+
+## Important Notes
+
+- Ingress Controller is installed once
+- Ingress resource is applied once
+- CI/CD only updates the Deployment image
+- No need for port-forward anymore
+- This setup is closer to real production environments
+
+# Part 16 - Deploy with Helm (Professional Kubernetes Setup)
+
+## Why Helm?
+
+Managing many Kubernetes YAML files manually is hard and error-prone.
+
+Helm helps us:
+
+- reuse templates
+- manage configuration in one place
+- deploy with a single command
+- upgrade easily without downtime
+
+---
+
+## Step 1 - Create Helm Chart
+
+```bash
+helm create focusboard-chart
+```
+
+---
+
+## Step 2 - Helm Chart Structure
+
+```text
+focusboard-chart/
+├── Chart.yaml
+├── values.yaml
+└── templates/
+```
+
+---
+
+## Step 3 - values.yaml (Central Configuration)
+
+```yaml
+web:
+  replicaCount: 2
+  image:
+    repository: nedakh126/focusboard-web
+    tag: latest
+
+db:
+  image:
+    repository: postgres
+    tag: 16
+
+cache:
+  image:
+    repository: redis
+    tag: 7
+
+config:
+  DB_HOST: db
+  DB_PORT: "5432"
+  DB_NAME: focusboard
+  REDIS_HOST: cache
+  REDIS_PORT: "6379"
+
+secret:
+  DB_USER: focususer
+  DB_PASSWORD: focuspass
+  SECRET_KEY: change-this-secret-key
+```
+
+---
+
+## Step 4 - Deploy with Helm
+
+```bash
+helm install focusboard ./focusboard-chart
+```
+
+---
+
+## Step 5 - Upgrade
+
+```bash
+helm upgrade focusboard ./focusboard-chart
+```
+
+---
+
+## Step 6 - Verify
+
+```bash
+kubectl get pods
+kubectl get svc
+kubectl get deployment
+```
+
+---
+
+## Final Result
+
+Helm replaces manual kubectl apply commands and provides a clean, reusable deployment method.
+
+---
+
+## Next Step
+
+Deploy this Helm chart to AWS EKS with CI/CD (CodePipeline).
+
+
