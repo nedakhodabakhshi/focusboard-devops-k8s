@@ -540,7 +540,6 @@ resource "aws_iam_role" "codepipeline_role" {
 }
 
 # Policy for CodePipeline
-# Policy for CodePipeline
 resource "aws_iam_role_policy" "codepipeline_policy" {
   name = "focusboard-codepipeline-policy"
   role = aws_iam_role.codepipeline_role.id

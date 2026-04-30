@@ -2237,3 +2237,804 @@ At the end of this AWS stage, the project had:
 This completes the AWS deployment stage of the FocusBoard DevOps project.
 
 
+# Part 18 - AWS CodePipeline CI/CD (Full Automation with EKS + Helm)
+
+## Goal
+
+In this final stage, the deployment process was fully automated using **AWS CodePipeline** and **AWS CodeBuild**.
+
+The goal was:
+
+- Automatically build Docker image
+- Push image to Amazon ECR
+- Deploy to EKS using Helm
+- Trigger everything from GitHub push
+
+---
+
+## Final CI/CD Architecture
+
+```text
+GitHub Push
+   |
+   v
+AWS CodePipeline
+   |
+   v
+AWS CodeBuild
+   |
+   +--> Build Docker Image
+   +--> Push to Amazon ECR
+   +--> Deploy to EKS using Helm
+   |
+   v
+Kubernetes (EKS Cluster)
+   |
+   v
+Updated Pods (Rolling Update)
+```
+
+---
+
+## 18.1 - GitHub Connection (CodeStar Connection)
+
+To connect AWS with GitHub, a **CodeStar Connection** was created.
+
+### Steps:
+
+1. Go to AWS Console:
+
+   ```text
+   Developer Tools → Settings → Connections
+   ```
+
+2. Click:
+
+   ```text
+   Create connection
+   ```
+
+3. Choose:
+
+   ```text
+   GitHub (via GitHub App)
+   ```
+
+4. Authenticate and select repository:
+
+   ```text
+   nedakhodabakhshi/focusboard-devops-k8s
+   ```
+
+5. After creation, AWS generated a connection ARN like:
+
+```text
+arn:aws:codeconnections:us-east-1:557690612191:connection/xxxxxxxx
+```
+
+---
+
+## 18.2 - IAM Role for CodePipeline
+
+A custom IAM role was created using Terraform with permissions for:
+
+- CodeBuild
+- S3
+- CodeStar Connections / CodeConnections
+
+### Important permissions:
+
+```json
+{
+  "Effect": "Allow",
+  "Action": [
+    "codebuild:StartBuild",
+    "codebuild:BatchGetBuilds"
+  ],
+  "Resource": "*"
+},
+{
+  "Effect": "Allow",
+  "Action": "s3:*",
+  "Resource": "*"
+},
+{
+  "Effect": "Allow",
+  "Action": [
+    "codestar-connections:UseConnection",
+    "codeconnections:UseConnection"
+  ],
+  "Resource": "<YOUR_CONNECTION_ARN>"
+}
+```
+
+### Terraform example:
+
+```hcl
+resource "aws_iam_role" "codepipeline_role" {
+  name = "focusboard-codepipeline-role"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect = "Allow"
+      Principal = {
+        Service = "codepipeline.amazonaws.com"
+      }
+      Action = "sts:AssumeRole"
+    }]
+  })
+
+  tags = {
+    Name    = "focusboard-codepipeline-role"
+    Project = "focusboard"
+  }
+}
+
+resource "aws_iam_role_policy" "codepipeline_policy" {
+  name = "focusboard-codepipeline-policy"
+  role = aws_iam_role.codepipeline_role.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "codebuild:StartBuild",
+          "codebuild:BatchGetBuilds"
+        ]
+        Resource = "*"
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "s3:*"
+        ]
+        Resource = "*"
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "codeconnections:UseConnection",
+          "codestar-connections:UseConnection"
+        ]
+        Resource = "<YOUR_CONNECTION_ARN>"
+      }
+    ]
+  })
+}
+```
+
+---
+
+## 18.3 - IAM Role for CodeBuild
+
+A custom IAM role was created for CodeBuild.
+
+CodeBuild needed permissions for:
+
+- Pulling source artifacts from the CodePipeline S3 bucket
+- Logging to CloudWatch
+- Logging in to ECR
+- Pushing Docker images to ECR
+- Describing the EKS cluster
+- Deploying to EKS through Kubernetes access entries
+
+### Important CodeBuild permissions:
+
+```json
+{
+  "Effect": "Allow",
+  "Action": [
+    "ecr:GetAuthorizationToken",
+    "ecr:BatchCheckLayerAvailability",
+    "ecr:InitiateLayerUpload",
+    "ecr:UploadLayerPart",
+    "ecr:CompleteLayerUpload",
+    "ecr:PutImage",
+    "ecr:BatchGetImage",
+    "ecr:DescribeRepositories"
+  ],
+  "Resource": "*"
+},
+{
+  "Effect": "Allow",
+  "Action": [
+    "eks:DescribeCluster"
+  ],
+  "Resource": "*"
+},
+{
+  "Effect": "Allow",
+  "Action": [
+    "logs:CreateLogGroup",
+    "logs:CreateLogStream",
+    "logs:PutLogEvents"
+  ],
+  "Resource": "*"
+},
+{
+  "Effect": "Allow",
+  "Action": [
+    "s3:GetObject",
+    "s3:GetObjectVersion",
+    "s3:PutObject",
+    "s3:ListBucket"
+  ],
+  "Resource": [
+    "<PIPELINE_BUCKET_ARN>",
+    "<PIPELINE_BUCKET_ARN>/*"
+  ]
+}
+```
+
+### Why S3 access was needed
+
+CodePipeline stores source artifacts in an S3 bucket before passing them to CodeBuild.
+
+Without S3 permissions, CodeBuild failed with:
+
+```text
+AccessDenied: User is not authorized to perform: s3:GetObject
+```
+
+The fix was to add S3 permissions to the **CodeBuild role**.
+
+---
+
+## 18.4 - EKS Access Entry for CodeBuild
+
+CodeBuild also needed permission to access Kubernetes inside EKS.
+
+Terraform was used to create an EKS access entry for the CodeBuild role.
+
+### Terraform example:
+
+```hcl
+resource "aws_eks_access_entry" "codebuild_access" {
+  cluster_name  = aws_eks_cluster.focusboard_cluster.name
+  principal_arn = aws_iam_role.codebuild_role.arn
+  type          = "STANDARD"
+}
+
+resource "aws_eks_access_policy_association" "codebuild_admin" {
+  cluster_name  = aws_eks_cluster.focusboard_cluster.name
+  principal_arn = aws_iam_role.codebuild_role.arn
+
+  policy_arn = "arn:aws:eks::aws:cluster-access-policy/AmazonEKSClusterAdminPolicy"
+
+  access_scope {
+    type = "cluster"
+  }
+}
+```
+
+### Why this was required
+
+The buildspec uses:
+
+```bash
+aws eks update-kubeconfig
+helm upgrade --install ...
+```
+
+So CodeBuild must be recognized by EKS as an authorized principal.
+
+---
+
+## 18.5 - CodeBuild Project
+
+A CodeBuild project was created and connected to the pipeline.
+
+### Responsibilities of CodeBuild:
+
+- Build Docker image
+- Tag image
+- Push image to ECR
+- Deploy to EKS using Helm
+
+### Important setting
+
+CodeBuild must use:
+
+```text
+Privileged mode: enabled
+```
+
+This is required because Docker builds run inside CodeBuild.
+
+### Terraform example:
+
+```hcl
+resource "aws_codebuild_project" "focusboard_build" {
+  name          = "focusboard-build"
+  service_role  = aws_iam_role.codebuild_role.arn
+  build_timeout = 30
+
+  artifacts {
+    type = "CODEPIPELINE"
+  }
+
+  environment {
+    compute_type    = "BUILD_GENERAL1_SMALL"
+    image           = "aws/codebuild/standard:7.0"
+    type            = "LINUX_CONTAINER"
+    privileged_mode = true
+  }
+
+  source {
+    type      = "CODEPIPELINE"
+    buildspec = "buildspec.yml"
+  }
+
+  logs_config {
+    cloudwatch_logs {
+      group_name  = "/aws/codebuild/focusboard"
+      stream_name = "build-log"
+    }
+  }
+
+  tags = {
+    Name    = "focusboard-codebuild"
+    Project = "focusboard"
+  }
+}
+```
+
+---
+
+## 18.6 - CodePipeline Project
+
+The CodePipeline was created with two stages:
+
+1. Source
+2. Build
+
+### Terraform example:
+
+```hcl
+resource "aws_codepipeline" "focusboard_pipeline" {
+  name     = "focusboard-pipeline"
+  role_arn = aws_iam_role.codepipeline_role.arn
+
+  artifact_store {
+    location = aws_s3_bucket.pipeline_bucket.bucket
+    type     = "S3"
+  }
+
+  stage {
+    name = "Source"
+
+    action {
+      name             = "Source"
+      category         = "Source"
+      owner            = "AWS"
+      provider         = "CodeStarSourceConnection"
+      version          = "1"
+      output_artifacts = ["source_output"]
+
+      configuration = {
+        ConnectionArn    = "<YOUR_CONNECTION_ARN>"
+        FullRepositoryId = "nedakhodabakhshi/focusboard-devops-k8s"
+        BranchName       = "aws-eks-codepipeline"
+      }
+    }
+  }
+
+  stage {
+    name = "Build"
+
+    action {
+      name             = "Build"
+      category         = "Build"
+      owner            = "AWS"
+      provider         = "CodeBuild"
+      input_artifacts  = ["source_output"]
+      output_artifacts = ["build_output"]
+      version          = "1"
+
+      configuration = {
+        ProjectName = aws_codebuild_project.focusboard_build.name
+      }
+    }
+  }
+}
+```
+
+---
+
+## 18.7 - buildspec.yml (Critical File)
+
+This file controls the entire CI/CD process.
+
+### Final structure:
+
+```yaml
+version: 0.2
+
+env:
+  variables:
+    AWS_DEFAULT_REGION: us-east-1
+    AWS_ACCOUNT_ID: "557690612191"
+    ECR_REPOSITORY_NAME: focusboard-web
+    EKS_CLUSTER_NAME: focusboard-eks-cluster
+    HELM_RELEASE_NAME: focusboard
+    HELM_CHART_PATH: helm/focusboard-chart-aws
+
+phases:
+  install:
+    commands:
+      - echo "Installing kubectl..."
+      - curl -LO "https://dl.k8s.io/release/v1.35.3/bin/linux/amd64/kubectl"
+      - chmod +x kubectl
+      - mv kubectl /usr/local/bin/kubectl
+
+      - echo "Installing Helm..."
+      - curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+
+      - echo "Checking tool versions..."
+      - aws --version
+      - docker --version
+      - kubectl version --client
+      - helm version
+
+  pre_build:
+    commands:
+      - echo "Logging in to Amazon ECR..."
+      - ECR_URI="$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com/$ECR_REPOSITORY_NAME"
+      - aws ecr get-login-password --region $AWS_DEFAULT_REGION | docker login --username AWS --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
+
+      - echo "Creating image tags..."
+      - COMMIT_HASH=$(echo $CODEBUILD_RESOLVED_SOURCE_VERSION | cut -c 1-7)
+      - IMAGE_TAG=${COMMIT_HASH:=latest}
+      - echo "Image tag is $IMAGE_TAG"
+
+      - echo "Connecting kubectl to EKS..."
+      - aws eks update-kubeconfig --region $AWS_DEFAULT_REGION --name $EKS_CLUSTER_NAME
+
+  build:
+    commands:
+      - echo "Building Docker image..."
+      - docker build --pull -t $ECR_REPOSITORY_NAME:latest .
+
+      - echo "Tagging Docker image..."
+      - docker tag $ECR_REPOSITORY_NAME:latest $ECR_URI:latest
+      - docker tag $ECR_REPOSITORY_NAME:latest $ECR_URI:$IMAGE_TAG
+
+  post_build:
+    commands:
+      - echo "Pushing Docker image to ECR..."
+      - docker push $ECR_URI:latest
+      - docker push $ECR_URI:$IMAGE_TAG
+
+      - echo "Deploying to EKS using Helm..."
+      - helm upgrade --install $HELM_RELEASE_NAME $HELM_CHART_PATH --set web.image.repository=$ECR_URI --set web.image.tag=$IMAGE_TAG
+
+      - echo "Checking rollout status..."
+      - kubectl rollout status deployment/focusboard-web
+
+      - echo "Deployment completed successfully."
+
+artifacts:
+  files:
+    - buildspec.yml
+```
+
+---
+
+## 18.8 - CI/CD Steps inside CodeBuild
+
+### 1. Install tools
+
+CodeBuild installs:
+
+- kubectl
+- Helm
+
+### 2. Authenticate to ECR
+
+```bash
+aws ecr get-login-password --region $AWS_DEFAULT_REGION | docker login --username AWS --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
+```
+
+### 3. Build Docker image
+
+```bash
+docker build --pull -t $ECR_REPOSITORY_NAME:latest .
+```
+
+### 4. Tag image
+
+```bash
+docker tag $ECR_REPOSITORY_NAME:latest $ECR_URI:latest
+docker tag $ECR_REPOSITORY_NAME:latest $ECR_URI:$IMAGE_TAG
+```
+
+### 5. Push to ECR
+
+```bash
+docker push $ECR_URI:latest
+docker push $ECR_URI:$IMAGE_TAG
+```
+
+### 6. Connect to EKS
+
+```bash
+aws eks update-kubeconfig --region $AWS_DEFAULT_REGION --name $EKS_CLUSTER_NAME
+```
+
+### 7. Deploy with Helm
+
+```bash
+helm upgrade --install $HELM_RELEASE_NAME $HELM_CHART_PATH --set web.image.repository=$ECR_URI --set web.image.tag=$IMAGE_TAG
+```
+
+---
+
+## 18.9 - Important Debug Fixes
+
+### Fix 1 - Do not store GitHub token in Terraform
+
+At first, the pipeline used:
+
+```hcl
+OAuthToken = "ghp_xxxxx"
+```
+
+This is not secure and GitHub blocked the push because it detected a secret.
+
+The solution was to use:
+
+```text
+CodeStarSourceConnection
+```
+
+instead of GitHub OAuth token.
+
+---
+
+### Fix 2 - CodePipeline needed permission to use GitHub Connection
+
+The Source stage failed with:
+
+```text
+Unable to use Connection
+```
+
+The fix was to add this permission to the CodePipeline role:
+
+```json
+{
+  "Effect": "Allow",
+  "Action": [
+    "codestar-connections:UseConnection",
+    "codeconnections:UseConnection"
+  ],
+  "Resource": "<YOUR_CONNECTION_ARN>"
+}
+```
+
+---
+
+### Fix 3 - CodeBuild needed S3 permissions
+
+CodeBuild failed with:
+
+```text
+AccessDenied: s3:GetObject
+```
+
+The fix was to add S3 permissions to the CodeBuild role.
+
+---
+
+### Fix 4 - Helm command must be one line
+
+The pipeline failed with:
+
+```text
+helm upgrade requires 2 arguments
+```
+
+The fix was to make the Helm command one line in `buildspec.yml`:
+
+```bash
+helm upgrade --install $HELM_RELEASE_NAME $HELM_CHART_PATH --set web.image.repository=$ECR_URI --set web.image.tag=$IMAGE_TAG
+```
+
+---
+
+## 18.10 - Push Changes to GitHub
+
+After changing Terraform or buildspec files:
+
+```bash
+git status
+git add .
+git commit -m "Add AWS CodePipeline deployment"
+git push origin aws-eks-codepipeline
+```
+
+The pipeline reads from:
+
+```text
+aws-eks-codepipeline
+```
+
+---
+
+## 18.11 - Run the Pipeline
+
+Go to:
+
+```text
+AWS Console → CodePipeline → focusboard-pipeline
+```
+
+Then click:
+
+```text
+Release change
+```
+
+Expected:
+
+- Source → Succeeded
+- Build → Succeeded
+
+---
+
+## 18.12 - Verify Deployment in Kubernetes
+
+Connect kubectl to EKS:
+
+```bash
+aws eks update-kubeconfig --region us-east-1 --name focusboard-eks-cluster
+```
+
+Check pods:
+
+```bash
+kubectl get pods
+```
+
+Check deployments:
+
+```bash
+kubectl get deployment
+```
+
+Check services:
+
+```bash
+kubectl get svc
+```
+
+Check image version:
+
+```bash
+kubectl describe deployment focusboard-web | grep Image
+```
+
+Expected:
+
+```text
+557690612191.dkr.ecr.us-east-1.amazonaws.com/focusboard-web:<commit-tag>
+```
+
+---
+
+## 18.13 - Verify Application via ALB
+
+Check Ingress:
+
+```bash
+kubectl get ingress
+```
+
+If the ALB address exists, open:
+
+```text
+http://<ALB-DNS>/login
+```
+
+---
+
+## 18.14 - Initialize Database if Needed
+
+During testing, the application returned an internal error because the `users` table did not exist.
+
+The fix was to run the database initialization script manually inside the web deployment:
+
+```bash
+kubectl exec deployment/focusboard-web -- python /app/init_db.py
+```
+
+Then restart the web deployment:
+
+```bash
+kubectl rollout restart deployment/focusboard-web
+```
+
+Check pods:
+
+```bash
+kubectl get pods
+```
+
+After this, registration and login worked successfully.
+
+---
+
+## 18.15 - Final Result of CodePipeline Stage
+
+At the end of this stage, the project achieved:
+
+- Full CI/CD with AWS CodePipeline
+- GitHub integration via CodeStar Connection
+- Automated Docker build and push to ECR
+- Automated Helm deployment to EKS
+- CodeBuild access to EKS using Access Entries
+- Successful app deployment through the pipeline
+- Application accessible through ALB
+
+---
+
+## 18.16 - Cleanup to Avoid AWS Costs
+
+Delete application release:
+
+```bash
+helm uninstall focusboard
+```
+
+Delete AWS Load Balancer Controller:
+
+```bash
+helm uninstall aws-load-balancer-controller -n kube-system
+```
+
+Destroy Kubernetes Terraform resources:
+
+```bash
+cd terraform/terraform-k8s
+terraform destroy
+```
+
+Destroy AWS infrastructure:
+
+```bash
+cd ../terraform-infra
+terraform destroy
+```
+
+Check these AWS services manually after cleanup:
+
+```text
+EC2 → Load Balancers
+EC2 → Target Groups
+EC2 → Volumes
+EKS → Clusters
+ECR → Repositories
+S3 → Buckets
+CodePipeline
+CodeBuild
+IAM Roles
+```
+
+---
+
+## Final DevOps Achievement
+
+This project now includes:
+
+- Local development with Flask and Docker
+- Docker Compose with PostgreSQL and Redis
+- Kubernetes deployment with manifests
+- Helm deployment
+- GitHub Actions for local Kubernetes CI/CD
+- AWS EKS deployment with Terraform
+- EBS-backed PostgreSQL persistence
+- AWS ALB Ingress
+- Full AWS CodePipeline automation
