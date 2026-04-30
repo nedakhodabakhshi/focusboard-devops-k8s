@@ -1,0 +1,70 @@
+version: 0.2
+
+env:
+  variables:
+    AWS_DEFAULT_REGION: us-east-1
+    AWS_ACCOUNT_ID: "557690612191"
+    ECR_REPOSITORY_NAME: focusboard-web
+    EKS_CLUSTER_NAME: focusboard-eks-cluster
+    HELM_RELEASE_NAME: focusboard
+    HELM_CHART_PATH: helm/focusboard-chart-aws
+
+phases:
+  install:
+    commands:
+      - echo "Installing kubectl..."
+      - curl -LO "https://dl.k8s.io/release/v1.35.3/bin/linux/amd64/kubectl"
+      - chmod +x kubectl
+      - mv kubectl /usr/local/bin/kubectl
+
+      - echo "Installing Helm..."
+      - curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+
+      - echo "Checking tool versions..."
+      - aws --version
+      - docker --version
+      - kubectl version --client
+      - helm version
+
+  pre_build:
+    commands:
+      - echo "Logging in to Amazon ECR..."
+      - ECR_URI="$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com/$ECR_REPOSITORY_NAME"
+      - aws ecr get-login-password --region $AWS_DEFAULT_REGION | docker login --username AWS --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
+
+      - echo "Creating image tags..."
+      - COMMIT_HASH=$(echo $CODEBUILD_RESOLVED_SOURCE_VERSION | cut -c 1-7)
+      - IMAGE_TAG=${COMMIT_HASH:=latest}
+      - echo "Image tag is $IMAGE_TAG"
+
+      - echo "Connecting kubectl to EKS..."
+      - aws eks update-kubeconfig --region $AWS_DEFAULT_REGION --name $EKS_CLUSTER_NAME
+
+  build:
+    commands:
+      - echo "Building Docker image..."
+      - docker build --pull -t $ECR_REPOSITORY_NAME:latest .
+
+      - echo "Tagging Docker image..."
+      - docker tag $ECR_REPOSITORY_NAME:latest $ECR_URI:latest
+      - docker tag $ECR_REPOSITORY_NAME:latest $ECR_URI:$IMAGE_TAG
+
+  post_build:
+    commands:
+      - echo "Pushing Docker image to ECR..."
+      - docker push $ECR_URI:latest
+      - docker push $ECR_URI:$IMAGE_TAG
+
+      - echo "Deploying to EKS using Helm..."
+      - helm upgrade --install $HELM_RELEASE_NAME $HELM_CHART_PATH \
+          --set web.image.repository=$ECR_URI \
+          --set web.image.tag=$IMAGE_TAG
+
+      - echo "Checking rollout status..."
+      - kubectl rollout status deployment/focusboard-web
+
+      - echo "Deployment completed successfully."
+
+artifacts:
+  files:
+    - buildspec.yml

@@ -381,3 +381,228 @@ resource "aws_iam_role_policy_attachment" "aws_load_balancer_controller_policy_a
   role       = aws_iam_role.aws_load_balancer_controller_role.name
   policy_arn = aws_iam_policy.aws_load_balancer_controller_policy.arn
 }
+
+# IAM role for AWS CodeBuild.
+# CodeBuild will use this role to build Docker images, push them to ECR,
+# and deploy the application to EKS using Helm.
+resource "aws_iam_role" "codebuild_role" {
+  name = "focusboard-codebuild-role"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect = "Allow"
+      Principal = {
+        Service = "codebuild.amazonaws.com"
+      }
+      Action = "sts:AssumeRole"
+    }]
+  })
+
+  tags = {
+    Name    = "focusboard-codebuild-role"
+    Project = "focusboard"
+  }
+}
+
+# IAM policy for CodeBuild.
+# This allows CodeBuild to push Docker images to ECR,
+# describe the EKS cluster, and write logs to CloudWatch.
+resource "aws_iam_role_policy" "codebuild_policy" {
+  name = "focusboard-codebuild-policy"
+  role = aws_iam_role.codebuild_role.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "ecr:GetAuthorizationToken",
+          "ecr:BatchCheckLayerAvailability",
+          "ecr:InitiateLayerUpload",
+          "ecr:UploadLayerPart",
+          "ecr:CompleteLayerUpload",
+          "ecr:PutImage",
+          "ecr:BatchGetImage",
+          "ecr:DescribeRepositories"
+        ]
+        Resource = "*"
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "eks:DescribeCluster"
+        ]
+        Resource = "*"
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "logs:CreateLogGroup",
+          "logs:CreateLogStream",
+          "logs:PutLogEvents"
+        ]
+        Resource = "*"
+      }
+    ]
+  })
+}
+
+# Grant CodeBuild access to EKS cluster
+resource "aws_eks_access_entry" "codebuild_access" {
+  cluster_name  = aws_eks_cluster.focusboard_cluster.name
+  principal_arn = aws_iam_role.codebuild_role.arn
+  type          = "STANDARD"
+}
+
+# Attach admin policy to CodeBuild role for Kubernetes access
+resource "aws_eks_access_policy_association" "codebuild_admin" {
+  cluster_name  = aws_eks_cluster.focusboard_cluster.name
+  principal_arn = aws_iam_role.codebuild_role.arn
+
+  policy_arn = "arn:aws:eks::aws:cluster-access-policy/AmazonEKSClusterAdminPolicy"
+
+  access_scope {
+    type = "cluster"
+  }
+}
+
+# CodeBuild project for building Docker image and deploying to EKS
+resource "aws_codebuild_project" "focusboard_build" {
+  name          = "focusboard-build"
+  service_role  = aws_iam_role.codebuild_role.arn
+  build_timeout = 30
+
+  artifacts {
+    type = "NO_ARTIFACTS"
+  }
+
+  environment {
+    compute_type    = "BUILD_GENERAL1_SMALL"
+    image           = "aws/codebuild/standard:7.0"
+    type            = "LINUX_CONTAINER"
+    privileged_mode = true # Required for Docker build
+  }
+
+  source {
+    type            = "GITHUB"
+    location        = "https://github.com/nedakhodabakhshi/focusboard-devops-k8s.git"
+    buildspec       = "buildspec.yml"
+    git_clone_depth = 1
+  }
+
+  logs_config {
+    cloudwatch_logs {
+      group_name  = "/aws/codebuild/focusboard"
+      stream_name = "build-log"
+    }
+  }
+
+  tags = {
+    Name    = "focusboard-codebuild"
+    Project = "focusboard"
+  }
+}
+
+# IAM role for CodePipeline
+resource "aws_iam_role" "codepipeline_role" {
+  name = "focusboard-codepipeline-role"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect = "Allow"
+      Principal = {
+        Service = "codepipeline.amazonaws.com"
+      }
+      Action = "sts:AssumeRole"
+    }]
+  })
+
+  tags = {
+    Name    = "focusboard-codepipeline-role"
+    Project = "focusboard"
+  }
+}
+
+# Policy for CodePipeline
+resource "aws_iam_role_policy" "codepipeline_policy" {
+  name = "focusboard-codepipeline-policy"
+  role = aws_iam_role.codepipeline_role.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "codebuild:StartBuild",
+          "codebuild:BatchGetBuilds"
+        ]
+        Resource = "*"
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "s3:*"
+        ]
+        Resource = "*"
+      }
+    ]
+  })
+}
+resource "aws_s3_bucket" "pipeline_bucket" {
+  bucket = "focusboard-pipeline-bucket-557690612191"
+
+  tags = {
+    Name = "focusboard-pipeline-bucket"
+  }
+}
+resource "aws_codepipeline" "focusboard_pipeline" {
+  name     = "focusboard-pipeline"
+  role_arn = aws_iam_role.codepipeline_role.arn
+
+  artifact_store {
+    location = aws_s3_bucket.pipeline_bucket.bucket
+    type     = "S3"
+  }
+
+  stage {
+    name = "Source"
+
+    action {
+      name             = "Source"
+      category         = "Source"
+      owner            = "ThirdParty"
+      provider         = "GitHub"
+      version          = "1"
+      output_artifacts = ["source_output"]
+
+      configuration = {
+        Owner      = "nedakhodabakhshi"
+        Repo       = "focusboard-devops-k8s"
+        Branch     = "aws-eks-codepipeline"
+        
+      }
+    }
+  }
+
+  stage {
+    name = "Build"
+
+    action {
+      name             = "Build"
+      category         = "Build"
+      owner            = "AWS"
+      provider         = "CodeBuild"
+      input_artifacts  = ["source_output"]
+      output_artifacts = ["build_output"]
+      version          = "1"
+
+      configuration = {
+        ProjectName = aws_codebuild_project.focusboard_build.name
+      }
+    }
+  }
+}

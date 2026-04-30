@@ -17,3 +17,8 @@ output "aws_load_balancer_controller_role_arn" {
   description = "IAM Role ARN for AWS Load Balancer Controller"
   value       = aws_iam_role.aws_load_balancer_controller_role.arn
 }
+
+output "codebuild_role_arn" {
+  description = "IAM Role ARN for CodeBuild"
+  value       = aws_iam_role.codebuild_role.arn
+}
