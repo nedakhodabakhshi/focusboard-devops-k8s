@@ -540,6 +540,7 @@ resource "aws_iam_role" "codepipeline_role" {
 }
 
 # Policy for CodePipeline
+# Policy for CodePipeline
 resource "aws_iam_role_policy" "codepipeline_policy" {
   name = "focusboard-codepipeline-policy"
   role = aws_iam_role.codepipeline_role.id
@@ -561,10 +562,19 @@ resource "aws_iam_role_policy" "codepipeline_policy" {
           "s3:*"
         ]
         Resource = "*"
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "codeconnections:UseConnection",
+          "codestar-connections:UseConnection"
+        ]
+        Resource = "arn:aws:codeconnections:us-east-1:557690612191:connection/fb812773-431b-46ba-802b-20374f3f9ea7"
       }
     ]
   })
 }
+
 resource "aws_s3_bucket" "pipeline_bucket" {
   bucket = "focusboard-pipeline-bucket-557690612191"
 
@@ -582,23 +592,23 @@ resource "aws_codepipeline" "focusboard_pipeline" {
   }
 
   stage {
-  name = "Source"
+    name = "Source"
 
-  action {
-    name             = "Source"
-    category         = "Source"
-    owner            = "AWS"
-    provider         = "CodeStarSourceConnection"
-    version          = "1"
-    output_artifacts = ["source_output"]
+    action {
+      name             = "Source"
+      category         = "Source"
+      owner            = "AWS"
+      provider         = "CodeStarSourceConnection"
+      version          = "1"
+      output_artifacts = ["source_output"]
 
-    configuration = {
-      ConnectionArn    = "arn:aws:codeconnections:us-east-1:557690612191:connection/fb812773-431b-46ba-802b-20374f3f9ea7"
-      FullRepositoryId = "nedakhodabakhshi/focusboard-devops-k8s"
-      BranchName       = "aws-eks-codepipeline"
+      configuration = {
+        ConnectionArn    = "arn:aws:codeconnections:us-east-1:557690612191:connection/fb812773-431b-46ba-802b-20374f3f9ea7"
+        FullRepositoryId = "nedakhodabakhshi/focusboard-devops-k8s"
+        BranchName       = "aws-eks-codepipeline"
+      }
     }
   }
-}
 
   stage {
     name = "Build"
