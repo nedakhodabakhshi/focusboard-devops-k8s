@@ -9,6 +9,7 @@ env:
     HELM_RELEASE_NAME: focusboard
     HELM_CHART_PATH: helm/focusboard-chart-aws
 
+
 phases:
   install:
     commands:
@@ -56,10 +57,7 @@ phases:
       - docker push $ECR_URI:$IMAGE_TAG
 
       - echo "Deploying to EKS using Helm..."
-      - helm upgrade --install $HELM_RELEASE_NAME $HELM_CHART_PATH \
-          --set web.image.repository=$ECR_URI \
-          --set web.image.tag=$IMAGE_TAG
-
+      - helm upgrade --install $HELM_RELEASE_NAME $HELM_CHART_PATH --set web.image.repository=$ECR_URI --set web.image.tag=$IMAGE_TAG
       - echo "Checking rollout status..."
       - kubectl rollout status deployment/focusboard-web
 
