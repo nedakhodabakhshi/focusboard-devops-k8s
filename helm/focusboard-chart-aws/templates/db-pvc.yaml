@@ -1,0 +1,13 @@
+{{- if .Values.db.persistence.enabled }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: focusboard-db-pvc
+spec:
+  accessModes:
+    - {{ .Values.db.persistence.accessMode }}
+  storageClassName: {{ .Values.db.persistence.storageClass }}
+  resources:
+    requests:
+      storage: {{ .Values.db.persistence.size }}
+{{- end }}

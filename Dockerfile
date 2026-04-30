@@ -12,6 +12,7 @@ COPY . .
 
 RUN adduser --disabled-password --gecos "" appuser && \
     chown -R appuser:appuser /app && \
+    sed -i 's/\r$//' /app/entrypoint.sh && \
     chmod +x /app/entrypoint.sh
 
 USER appuser

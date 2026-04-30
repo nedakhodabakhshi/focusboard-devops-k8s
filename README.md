@@ -1353,5 +1353,887 @@ Helm replaces manual kubectl apply commands and provides a clean, reusable deplo
 ## Next Step
 
 Deploy this Helm chart to AWS EKS with CI/CD (CodePipeline).
+# Part 17 - AWS EKS Deployment with Terraform, ECR, Helm, EBS, and ALB
+
+## Goal
+
+In this stage, the FocusBoard project was moved from a local Kubernetes environment to a real AWS EKS cluster.
+
+The goal was to build a clean, repeatable, cloud-based deployment process using:
+
+* Terraform for AWS infrastructure
+* ECR for storing the Docker image
+* EKS for Kubernetes
+* EBS CSI Driver for persistent PostgreSQL storage
+* Helm for application deployment
+* AWS Load Balancer Controller for ALB Ingress
+
+---
+
+## Final AWS Architecture
+
+```text
+User Browser
+   |
+   v
+AWS Application Load Balancer (ALB)
+   |
+   v
+Kubernetes Ingress
+   |
+   v
+focusboard-web-service
+   |
+   v
+FocusBoard Web Pods
+   |
+   +--> PostgreSQL Pod with EBS-backed PVC
+   |
+   +--> Redis Pod
+```
+
+---
+
+# 17.1 - Terraform Folder Structure
+
+For AWS, the Terraform code was split into two separate parts:
+
+```text
+terraform/
+├── terraform-infra/
+│   ├── main.tf
+│   ├── provider.tf
+│   ├── variables.tf
+│   ├── outputs.tf
+│   └── aws-load-balancer-controller-policy.json
+│
+└── terraform-k8s/
+    ├── main.tf
+    ├── provider.tf
+    ├── variables.tf
+    └── outputs.tf
+```
+
+## Why split Terraform into two folders?
+
+At first, everything was in one Terraform folder.
+But this caused problems because Kubernetes resources depend on the EKS cluster already existing.
+
+So the project was split like this:
+
+### `terraform-infra`
+
+This folder creates AWS infrastructure:
+
+* ECR repository
+* IAM roles
+* EKS cluster
+* EKS node group
+* EKS add-ons
+* EBS CSI Driver
+* IAM OIDC provider
+* IAM role for AWS Load Balancer Controller
+
+### `terraform-k8s`
+
+This folder manages Kubernetes-side resources after the cluster exists:
+
+* `aws-auth` ConfigMap
+* StorageClass for EBS
+
+This makes the project cleaner and easier to repeat.
+
+---
+
+# 17.2 - AWS Region and Account
+
+The project was deployed in:
+
+```text
+Region: us-east-1
+AWS Account ID: 557690612191
+```
+
+The default VPC was used:
+
+```text
+VPC ID: vpc-05b9fc4f0c956d7b8
+```
+
+---
+
+# 17.3 - Create AWS Infrastructure with Terraform
+
+Go to the infrastructure folder:
+
+```bash
+cd terraform/terraform-infra
+```
+
+Initialize Terraform:
+
+```bash
+terraform init
+```
+
+Format files:
+
+```bash
+terraform fmt
+```
+
+Validate configuration:
+
+```bash
+terraform validate
+```
+
+Check the execution plan:
+
+```bash
+terraform plan
+```
+
+Apply the infrastructure:
+
+```bash
+terraform apply
+```
+
+When prompted:
+
+```text
+yes
+```
+
+## What this created
+
+Terraform created:
+
+* ECR repository: `focusboard-web`
+* EKS cluster: `focusboard-eks-cluster`
+* EKS node group: `focusboard-node-group`
+* 2 worker nodes
+* IAM role for the EKS cluster
+* IAM role for worker nodes
+* EKS add-ons:
+
+  * `vpc-cni`
+  * `coredns`
+  * `kube-proxy`
+* EKS access entry for the IAM user
+
+---
+
+# 17.4 - Terraform Outputs
+
+After apply, check outputs:
+
+```bash
+terraform output
+```
+
+Important outputs included:
+
+```text
+cluster_name
+cluster_endpoint
+ecr_repository_url
+node_group_name
+```
+
+Example ECR output:
+
+```text
+557690612191.dkr.ecr.us-east-1.amazonaws.com/focusboard-web
+```
+
+---
+
+# 17.5 - Connect kubectl to EKS
+
+After the EKS cluster was created, kubectl was connected to the cluster:
+
+```bash
+aws eks update-kubeconfig \
+  --region us-east-1 \
+  --name focusboard-eks-cluster
+```
+
+Check the current context:
+
+```bash
+kubectl config current-context
+```
+
+Check worker nodes:
+
+```bash
+kubectl get nodes
+```
+
+Expected result:
+
+```text
+STATUS: Ready
+```
+
+---
+
+# 17.6 - Kubernetes Access with Terraform
+
+The project also configured Kubernetes access using Terraform.
+
+The `terraform-k8s` folder was used for Kubernetes-related configuration.
+
+Go to the folder:
+
+```bash
+cd ../terraform-k8s
+```
+
+Initialize Terraform:
+
+```bash
+terraform init
+```
+
+Apply Kubernetes configuration:
+
+```bash
+terraform apply
+```
+
+This managed the `aws-auth` ConfigMap and allowed the IAM user and node role to work properly with Kubernetes.
+
+---
+
+# 17.7 - EBS CSI Driver for Persistent Storage
+
+PostgreSQL needs persistent storage so that data is not lost when the pod restarts.
+
+For that, the AWS EBS CSI Driver was installed using Terraform in `terraform-infra`.
+
+The infrastructure included:
+
+* IAM OIDC provider
+* IAM role for EBS CSI Driver
+* AWS-managed policy:
+
+  * `AmazonEBSCSIDriverPolicy`
+* EKS add-on:
+
+  * `aws-ebs-csi-driver`
+
+After applying Terraform, the EBS CSI pods were checked:
+
+```bash
+kubectl get pods -n kube-system
+```
+
+Expected pods:
+
+```text
+ebs-csi-controller
+ebs-csi-node
+```
+
+Expected status:
+
+```text
+Running
+```
+
+---
+
+# 17.8 - Create EBS StorageClass with Terraform
+
+A StorageClass was created in `terraform-k8s`.
+
+StorageClass name:
+
+```text
+ebs-gp3
+```
+
+It uses:
+
+```text
+provisioner: ebs.csi.aws.com
+type: gp3
+reclaimPolicy: Retain
+volumeBindingMode: WaitForFirstConsumer
+```
+
+Check it:
+
+```bash
+kubectl get storageclass
+```
+
+Expected:
+
+```text
+ebs-gp3
+```
+
+---
+
+# 17.9 - Helm Structure for Local and AWS
+
+The original Helm chart was kept for local Kubernetes.
+
+A separate AWS Helm chart was created:
+
+```text
+helm/
+├── focusboard-chart/
+└── focusboard-chart-aws/
+```
+
+## Why create a separate AWS Helm chart?
+
+The local chart was already working with Docker Desktop Kubernetes.
+
+The AWS chart needed different settings:
+
+* ECR image repository
+* EBS StorageClass
+* AWS ALB Ingress annotations
+* AWS-specific deployment behavior
+
+So instead of modifying the local Helm chart, a separate AWS chart was created:
+
+```text
+focusboard-chart      → local Kubernetes
+focusboard-chart-aws  → AWS EKS
+```
+
+This keeps the project beginner-friendly and easy to follow step by step.
+
+---
+
+# 17.10 - Build Docker Image for AWS
+
+Before deploying to EKS, the Docker image was built locally.
+
+```bash
+docker build --pull -t focusboard-web .
+```
+
+## Why `--pull`?
+
+The Dockerfile starts with:
+
+```dockerfile
+FROM python:3.11-slim
+```
+
+That base image comes from Docker Hub.
+
+The `--pull` option tells Docker to pull the latest version of the base image before building the FocusBoard image.
+
+---
+
+# 17.11 - Login to Amazon ECR
+
+```bash
+aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin 557690612191.dkr.ecr.us-east-1.amazonaws.com
+```
+
+This logs Docker into Amazon ECR.
+
+---
+
+# 17.12 - Tag and Push Image to ECR
+
+Tag the image:
+
+```bash
+docker tag focusboard-web:latest 557690612191.dkr.ecr.us-east-1.amazonaws.com/focusboard-web:latest
+```
+
+Push it:
+
+```bash
+docker push 557690612191.dkr.ecr.us-east-1.amazonaws.com/focusboard-web:latest
+```
+
+Check ECR in AWS Console:
+
+```text
+ECR → Repositories → focusboard-web → Images
+```
+
+Expected image tag:
+
+```text
+latest
+```
+
+---
+
+# 17.13 - AWS Helm Chart Changes
+
+In the AWS Helm chart, the web image was changed to ECR:
+
+```yaml
+web:
+  image:
+    repository: 557690612191.dkr.ecr.us-east-1.amazonaws.com/focusboard-web
+    tag: latest
+    pullPolicy: Always
+```
+
+PostgreSQL persistence was configured to use EBS:
+
+```yaml
+db:
+  persistence:
+    enabled: true
+    size: 5Gi
+    accessMode: ReadWriteOnce
+    storageClass: ebs-gp3
+```
+
+The PVC template used:
+
+```yaml
+storageClassName: {{ .Values.db.persistence.storageClass }}
+```
+
+---
+
+# 17.14 - PostgreSQL EBS Fix
+
+When PostgreSQL first started with EBS, it failed because the EBS volume contained a `lost+found` directory.
+
+The fix was to add `PGDATA` in the PostgreSQL deployment:
+
+```yaml
+- name: PGDATA
+  value: /var/lib/postgresql/data/pgdata
+```
+
+This makes PostgreSQL store data inside a subdirectory instead of directly at the root of the mounted EBS volume.
+
+---
+
+# 17.15 - Dockerfile Fix for AWS/Linux
+
+The web pod initially failed with:
+
+```text
+exec /app/entrypoint.sh: no such file or directory
+```
+
+This was caused by Windows line endings in `entrypoint.sh`.
+
+The Dockerfile was updated to clean Windows CRLF characters:
+
+```dockerfile
+RUN adduser --disabled-password --gecos "" appuser && \
+    chown -R appuser:appuser /app && \
+    sed -i 's/\r$//' /app/entrypoint.sh && \
+    chmod +x /app/entrypoint.sh
+```
+
+Then the image was rebuilt and pushed again:
+
+```bash
+docker build --pull -t focusboard-web .
+docker tag focusboard-web:latest 557690612191.dkr.ecr.us-east-1.amazonaws.com/focusboard-web:latest
+docker push 557690612191.dkr.ecr.us-east-1.amazonaws.com/focusboard-web:latest
+```
+
+---
+
+# 17.16 - Deploy FocusBoard to EKS with Helm
+
+From the root of the project:
+
+```bash
+helm install focusboard ./helm/focusboard-chart-aws
+```
+
+If the release already exists:
+
+```bash
+helm upgrade focusboard ./helm/focusboard-chart-aws
+```
+
+Check resources:
+
+```bash
+kubectl get pods
+kubectl get deployment
+kubectl get svc
+kubectl get pvc
+kubectl get pv
+```
+
+Expected result:
+
+```text
+focusboard-cache   Running
+focusboard-db      Running
+focusboard-web     Running
+PVC                Bound
+```
+
+---
+
+# 17.17 - Verify NodePort Access
+
+The web service was first exposed using NodePort:
+
+```bash
+kubectl get svc
+```
+
+Example:
+
+```text
+focusboard-web-service   NodePort   5000:30007/TCP
+```
+
+Get node public IPs:
+
+```bash
+kubectl get nodes -o wide
+```
+
+Open:
+
+```text
+http://<NODE_PUBLIC_IP>:30007/login
+```
+
+Example:
+
+```text
+http://54.91.19.188:30007/login
+http://13.218.177.227:30007/login
+```
+
+Both node IPs worked because NodePort exposes the service through every worker node.
+
+---
+
+# 17.18 - AWS Load Balancer Controller
+
+NodePort worked, but it is not production-friendly.
+
+So AWS Load Balancer Controller was installed to create a real AWS Application Load Balancer from Kubernetes Ingress.
+
+## Why AWS Load Balancer Controller?
+
+In local Kubernetes, NGINX Ingress Controller was enough.
+
+In AWS, we need a controller that can call AWS APIs and create:
+
+* ALB
+* Target Groups
+* Listeners
+* Security Group rules
+
+That is why IAM permissions were required.
+
+---
+
+# 17.19 - IAM for AWS Load Balancer Controller
+
+The IAM policy was downloaded:
+
+```bash
+curl -o aws-load-balancer-controller-policy.json https://raw.githubusercontent.com/kubernetes-sigs/aws-load-balancer-controller/v2.14.1/docs/install/iam_policy.json
+```
+
+Terraform created:
+
+* IAM policy for AWS Load Balancer Controller
+* IAM role:
+
+  * `focusboard-aws-load-balancer-controller-role`
+* Policy attachment
+
+Output:
+
+```bash
+terraform output aws_load_balancer_controller_role_arn
+```
+
+Example:
+
+```text
+arn:aws:iam::557690612191:role/focusboard-aws-load-balancer-controller-role
+```
+
+---
+
+# 17.20 - Install AWS Load Balancer Controller with Helm
+
+Add the AWS EKS Helm chart repo:
+
+```bash
+helm repo add eks https://aws.github.io/eks-charts
+helm repo update
+```
+
+Create service account:
+
+```bash
+kubectl create serviceaccount aws-load-balancer-controller -n kube-system
+```
+
+Annotate it with the IAM role:
+
+```bash
+kubectl annotate serviceaccount aws-load-balancer-controller \
+  -n kube-system \
+  eks.amazonaws.com/role-arn=arn:aws:iam::557690612191:role/focusboard-aws-load-balancer-controller-role
+```
+
+Install the controller:
+
+```bash
+helm install aws-load-balancer-controller eks/aws-load-balancer-controller \
+  -n kube-system \
+  --set clusterName=focusboard-eks-cluster \
+  --set serviceAccount.create=false \
+  --set serviceAccount.name=aws-load-balancer-controller
+```
+
+---
+
+# 17.21 - Fix Load Balancer Controller VPC Detection
+
+The controller initially failed because it could not detect the VPC ID from instance metadata.
+
+It was fixed by upgrading the Helm release with explicit region and VPC ID:
+
+```bash
+helm upgrade aws-load-balancer-controller eks/aws-load-balancer-controller \
+  -n kube-system \
+  --set clusterName=focusboard-eks-cluster \
+  --set region=us-east-1 \
+  --set vpcId=vpc-05b9fc4f0c956d7b8 \
+  --set serviceAccount.create=false \
+  --set serviceAccount.name=aws-load-balancer-controller
+```
+
+Check the controller:
+
+```bash
+kubectl get pods -n kube-system | grep aws-load-balancer-controller
+```
+
+Expected:
+
+```text
+1/1 Running
+1/1 Running
+```
+
+---
+
+# 17.22 - Configure AWS ALB Ingress
+
+The AWS Helm chart Ingress was configured with ALB annotations:
+
+```yaml
+{{- if .Values.ingress.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: focusboard-ingress
+  annotations:
+    kubernetes.io/ingress.class: alb
+    alb.ingress.kubernetes.io/scheme: internet-facing
+    alb.ingress.kubernetes.io/target-type: ip
+spec:
+  ingressClassName: {{ .Values.ingress.className }}
+  rules:
+    - http:
+        paths:
+          - path: {{ .Values.ingress.path }}
+            pathType: {{ .Values.ingress.pathType }}
+            backend:
+              service:
+                name: focusboard-web-service
+                port:
+                  number: {{ .Values.web.service.port }}
+{{- end }}
+```
+
+Values:
+
+```yaml
+ingress:
+  enabled: true
+  className: alb
+  host: ""
+  path: /
+  pathType: Prefix
+```
+
+---
+
+# 17.23 - Apply ALB Ingress
+
+Upgrade the FocusBoard Helm release:
+
+```bash
+helm upgrade focusboard ./helm/focusboard-chart-aws
+```
+
+Check Ingress:
+
+```bash
+kubectl get ingress
+```
+
+Expected:
+
+```text
+focusboard-ingress   alb   *   k8s-xxxx.us-east-1.elb.amazonaws.com   80
+```
+
+Describe Ingress:
+
+```bash
+kubectl describe ingress focusboard-ingress
+```
+
+Expected:
+
+```text
+SuccessfullyReconciled
+```
+
+---
+
+# 17.24 - Access the App with ALB
+
+Open the ALB DNS in the browser:
+
+```text
+http://<ALB-DNS>/login
+```
+
+Example:
+
+```text
+http://k8s-default-focusboa-b11cb04cea-1931201181.us-east-1.elb.amazonaws.com/login
+```
+
+---
+
+# 17.25 - Useful Debug Commands
+
+Check pods:
+
+```bash
+kubectl get pods
+```
+
+Check services:
+
+```bash
+kubectl get svc
+```
+
+Check PVC and PV:
+
+```bash
+kubectl get pvc
+kubectl get pv
+```
+
+Check EBS CSI driver:
+
+```bash
+kubectl get pods -n kube-system | grep ebs
+```
+
+Check Load Balancer Controller:
+
+```bash
+kubectl get pods -n kube-system | grep aws-load-balancer-controller
+```
+
+Check Ingress:
+
+```bash
+kubectl get ingress
+kubectl describe ingress focusboard-ingress
+```
+
+Check app logs:
+
+```bash
+kubectl logs deployment/focusboard-web
+```
+
+Check database logs:
+
+```bash
+kubectl logs deployment/focusboard-db
+```
+
+---
+
+# 17.26 - Cleanup to Avoid AWS Costs
+
+When finished, delete application resources:
+
+```bash
+helm uninstall focusboard
+```
+
+Delete AWS Load Balancer Controller:
+
+```bash
+helm uninstall aws-load-balancer-controller -n kube-system
+```
+
+Destroy Kubernetes Terraform resources:
+
+```bash
+cd terraform/terraform-k8s
+terraform destroy
+```
+
+Destroy AWS infrastructure:
+
+```bash
+cd ../terraform-infra
+terraform destroy
+```
+
+When prompted:
+
+```text
+yes
+```
+
+---
+
+# 17.27 - Final AWS Result
+
+At the end of this AWS stage, the project had:
+
+* Docker image stored in Amazon ECR
+* EKS cluster created with Terraform
+* 2 worker nodes
+* PostgreSQL using EBS-backed PVC
+* Redis running inside Kubernetes
+* FocusBoard deployed with Helm
+* NodePort access working
+* AWS ALB Ingress working
+* AWS Load Balancer Controller installed
+* Terraform split into infrastructure and Kubernetes configuration
+
+This completes the AWS deployment stage of the FocusBoard DevOps project.
 
 

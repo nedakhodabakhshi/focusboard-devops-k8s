@@ -2,3 +2,8 @@
 __pycache__/
 *.pyc
 portforward.log
+
+# Terraform
+.terraform/
+*.tfstate
+*.tfstate.*

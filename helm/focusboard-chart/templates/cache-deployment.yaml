@@ -1,0 +1,19 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: focusboard-cache
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: focusboard-cache
+  template:
+    metadata:
+      labels:
+        app: focusboard-cache
+    spec:
+      containers:
+        - name: cache
+          image: redis:7
+          ports:
+            - containerPort: 6379
