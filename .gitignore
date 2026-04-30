@@ -6,4 +6,4 @@ portforward.log
 # Terraform
 .terraform/
 *.tfstate
-*.tfstate.*
+*.tfstate.**.tfstate.backup
