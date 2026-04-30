@@ -444,6 +444,19 @@ resource "aws_iam_role_policy" "codebuild_policy" {
           "logs:PutLogEvents"
         ]
         Resource = "*"
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "s3:GetObject",
+          "s3:GetObjectVersion",
+          "s3:PutObject",
+          "s3:ListBucket"
+        ]
+        Resource = [
+          aws_s3_bucket.pipeline_bucket.arn,
+          "${aws_s3_bucket.pipeline_bucket.arn}/*"
+        ]
       }
     ]
   })
@@ -569,24 +582,23 @@ resource "aws_codepipeline" "focusboard_pipeline" {
   }
 
   stage {
-    name = "Source"
+  name = "Source"
 
-    action {
-      name             = "Source"
-      category         = "Source"
-      owner            = "ThirdParty"
-      provider         = "GitHub"
-      version          = "1"
-      output_artifacts = ["source_output"]
+  action {
+    name             = "Source"
+    category         = "Source"
+    owner            = "AWS"
+    provider         = "CodeStarSourceConnection"
+    version          = "1"
+    output_artifacts = ["source_output"]
 
-      configuration = {
-        Owner      = "nedakhodabakhshi"
-        Repo       = "focusboard-devops-k8s"
-        Branch     = "aws-eks-codepipeline"
-        
-      }
+    configuration = {
+      ConnectionArn    = "arn:aws:codeconnections:us-east-1:557690612191:connection/fb812773-431b-46ba-802b-20374f3f9ea7"
+      FullRepositoryId = "nedakhodabakhshi/focusboard-devops-k8s"
+      BranchName       = "aws-eks-codepipeline"
     }
   }
+}
 
   stage {
     name = "Build"
